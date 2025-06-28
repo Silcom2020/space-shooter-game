@@ -81,7 +81,12 @@
             gameTime: 0,
             level: 1,
             enemySpawnRate: 0.005, // 敵の出現率
-            enemyCanShoot: false   // 敵が射撃できるかどうか
+            enemyCanShoot: false,   // 敵が射撃できるかどうか
+            // パワーアップ関連
+            rapidFire: 0,          // 連射パワーアップの残り時間
+            powerShot: 0,          // 強化弾パワーアップの残り時間
+            shield: 0,             // シールドの残り時間
+            lastShot: 0            // 最後に撃った時間
         };
         
         // プレイヤー
@@ -103,6 +108,9 @@
         
         // パーティクル配列
         let particles = [];
+        
+        // パワーアップアイテム配列
+        let powerUps = [];
         
         // 弾丸クラス
         class Bullet {
@@ -337,6 +345,115 @@
             }
         }
         
+        // パワーアップアイテムクラス
+        class PowerUp {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 20;
+                this.height = 20;
+                this.speed = -2;
+                this.types = ['rapidFire', 'powerShot', 'shield', 'health'];
+                this.type = this.types[Math.floor(Math.random() * this.types.length)];
+                this.bobOffset = Math.random() * Math.PI * 2;
+                this.originalY = y;
+                this.time = 0;
+            }
+            
+            update() {
+                this.x += this.speed;
+                this.time += 0.1;
+                // 上下に浮遊する動き
+                this.y = this.originalY + Math.sin(this.time + this.bobOffset) * 3;
+            }
+            
+            draw() {
+                const x = this.x;
+                const y = this.y;
+                const w = this.width;
+                const h = this.height;
+                
+                // 光るエフェクト
+                ctx.shadowBlur = 10;
+                
+                switch(this.type) {
+                    case 'rapidFire':
+                        ctx.shadowColor = '#00ff00';
+                        ctx.fillStyle = '#00ff00';
+                        // 連射アイコン（矢印）
+                        ctx.beginPath();
+                        ctx.moveTo(x + w/2, y + 3);
+                        ctx.lineTo(x + w - 3, y + h/2);
+                        ctx.lineTo(x + w/2, y + h - 3);
+                        ctx.lineTo(x + w/2 + 3, y + h - 6);
+                        ctx.lineTo(x + w/2 - 3, y + h - 6);
+                        ctx.lineTo(x + w/2 - 3, y + 6);
+                        ctx.lineTo(x + w/2 + 3, y + 6);
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                        
+                    case 'powerShot':
+                        ctx.shadowColor = '#ff6600';
+                        ctx.fillStyle = '#ff6600';
+                        // パワーショットアイコン（星型）
+                        ctx.beginPath();
+                        for (let i = 0; i < 5; i++) {
+                            const angle = (i * 4 * Math.PI) / 5;
+                            const radius = i % 2 === 0 ? 8 : 4;
+                            const px = x + w/2 + Math.cos(angle) * radius;
+                            const py = y + h/2 + Math.sin(angle) * radius;
+                            if (i === 0) ctx.moveTo(px, py);
+                            else ctx.lineTo(px, py);
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                        
+                    case 'shield':
+                        ctx.shadowColor = '#0088ff';
+                        ctx.fillStyle = '#0088ff';
+                        // シールドアイコン（盾型）
+                        ctx.beginPath();
+                        ctx.moveTo(x + w/2, y + 3);
+                        ctx.quadraticCurveTo(x + w - 3, y + 3, x + w - 3, y + h/2);
+                        ctx.quadraticCurveTo(x + w - 3, y + h - 3, x + w/2, y + h - 3);
+                        ctx.quadraticCurveTo(x + 3, y + h - 3, x + 3, y + h/2);
+                        ctx.quadraticCurveTo(x + 3, y + 3, x + w/2, y + 3);
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                        
+                    case 'health':
+                        ctx.shadowColor = '#ff0088';
+                        ctx.fillStyle = '#ff0088';
+                        // ハートアイコン
+                        ctx.beginPath();
+                        ctx.moveTo(x + w/2, y + h - 4);
+                        ctx.quadraticCurveTo(x + 3, y + h/2 - 2, x + 3, y + 6);
+                        ctx.quadraticCurveTo(x + 3, y + 3, x + 6, y + 3);
+                        ctx.quadraticCurveTo(x + w/2, y + 3, x + w/2, y + 6);
+                        ctx.quadraticCurveTo(x + w/2, y + 3, x + w - 6, y + 3);
+                        ctx.quadraticCurveTo(x + w - 3, y + 3, x + w - 3, y + 6);
+                        ctx.quadraticCurveTo(x + w - 3, y + h/2 - 2, x + w/2, y + h - 4);
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                }
+                
+                ctx.shadowBlur = 0;
+                
+                // 外枠
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 2, y + 2, w - 4, h - 4);
+            }
+            
+            isOffScreen() {
+                return this.x + this.width < 0;
+            }
+        }
+        
         // キーボードイベント
         document.addEventListener('keydown', (e) => {
             gameState.keys[e.code] = true;
@@ -359,7 +476,24 @@
         
         // プレイヤーの射撃
         function shoot() {
-            bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 0, '#00ffff', 'player'));
+            const currentTime = gameState.gameTime;
+            const shootDelay = gameState.rapidFire > 0 ? 3 : 8; // 連射パワーアップ時は間隔短縮
+            
+            if (currentTime - gameState.lastShot < shootDelay) {
+                return; // まだ射撃できない
+            }
+            
+            gameState.lastShot = currentTime;
+            
+            if (gameState.powerShot > 0) {
+                // パワーショット（3方向）
+                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 0, '#ffff00', 'player'));
+                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, -2, '#ffff00', 'player'));
+                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 2, '#ffff00', 'player'));
+            } else {
+                // 通常射撃
+                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 0, '#00ffff', 'player'));
+            }
         }
         
         // 敵の生成
@@ -369,6 +503,32 @@
             const bossChance = Math.min(0.05 + gameState.level * 0.02, 0.15);
             const type = Math.random() < bossChance ? 'boss' : 'basic';
             enemies.push(new Enemy(canvas.width, y, type));
+        }
+        
+        // パワーアップアイテムの生成
+        function spawnPowerUp() {
+            const y = Math.random() * (canvas.height - 40) + 20;
+            powerUps.push(new PowerUp(canvas.width, y));
+        }
+        
+        // パワーアップ効果を適用
+        function applyPowerUp(type) {
+            switch(type) {
+                case 'rapidFire':
+                    gameState.rapidFire = 600; // 10秒間（60FPS × 10秒）
+                    break;
+                case 'powerShot':
+                    gameState.powerShot = 600; // 10秒間
+                    break;
+                case 'shield':
+                    gameState.shield = 300; // 5秒間
+                    break;
+                case 'health':
+                    if (gameState.lives < 5) { // 最大5ライフまで
+                        gameState.lives++;
+                    }
+                    break;
+            }
         }
         
         // ゲームレベル管理
@@ -472,6 +632,18 @@
             const w = player.width;
             const h = player.height;
             
+            // シールドエフェクト
+            if (gameState.shield > 0) {
+                ctx.strokeStyle = '#0088ff';
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#0088ff';
+                ctx.beginPath();
+                ctx.arc(x + w/2, y + h/2, w/2 + 8, 0, 2 * Math.PI);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+            
             // 機体本体（メタリックブルー）
             ctx.fillStyle = '#4488cc';
             ctx.fillRect(x + 5, y + 6, w - 10, h - 12);
@@ -521,6 +693,11 @@
             gameState.gameTime++;
             updateGameLevel();
             
+            // パワーアップ効果の時間減少
+            if (gameState.rapidFire > 0) gameState.rapidFire--;
+            if (gameState.powerShot > 0) gameState.powerShot--;
+            if (gameState.shield > 0) gameState.shield--;
+            
             updatePlayer();
             
             // 弾丸更新
@@ -538,6 +715,10 @@
             enemies.forEach(enemy => enemy.update());
             enemies = enemies.filter(enemy => enemy.x > -enemy.width);
             
+            // パワーアップアイテム更新
+            powerUps.forEach(powerUp => powerUp.update());
+            powerUps = powerUps.filter(powerUp => !powerUp.isOffScreen());
+            
             // パーティクル更新
             particles.forEach(particle => particle.update());
             particles = particles.filter(particle => !particle.isDead());
@@ -552,6 +733,11 @@
                             enemies.splice(enemyIndex, 1);
                             gameState.score += enemy.type === 'boss' ? 100 : 10;
                             createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, 12);
+                            
+                            // パワーアップアイテムをランダムにドロップ
+                            if (Math.random() < 0.15) { // 15%の確率
+                                spawnPowerUp();
+                            }
                         } else {
                             createExplosion(bullet.x, bullet.y, 4);
                         }
@@ -559,35 +745,51 @@
                 });
             });
             
-            // 衝突判定 - 敵の弾とプレイヤー
-            enemyBullets.forEach((bullet, bulletIndex) => {
-                if (checkCollision(bullet, player)) {
-                    enemyBullets.splice(bulletIndex, 1);
-                    gameState.lives--;
-                    createExplosion(player.x + player.width/2, player.y + player.height/2, 8);
-                    
-                    if (gameState.lives <= 0) {
-                        gameOver();
-                    }
+            // 衝突判定 - プレイヤーとパワーアップアイテム
+            powerUps.forEach((powerUp, powerUpIndex) => {
+                if (checkCollision(powerUp, player)) {
+                    powerUps.splice(powerUpIndex, 1);
+                    applyPowerUp(powerUp.type);
+                    createExplosion(powerUp.x + powerUp.width/2, powerUp.y + powerUp.height/2, 6);
                 }
             });
             
-            // 衝突判定 - 敵とプレイヤー
-            enemies.forEach((enemy, enemyIndex) => {
-                if (checkCollision(enemy, player)) {
-                    enemies.splice(enemyIndex, 1);
-                    gameState.lives--;
-                    createExplosion(player.x + player.width/2, player.y + player.height/2, 10);
-                    
-                    if (gameState.lives <= 0) {
-                        gameOver();
+            // 衝突判定 - 敵の弾とプレイヤー（シールド考慮）
+            if (gameState.shield <= 0) {
+                enemyBullets.forEach((bullet, bulletIndex) => {
+                    if (checkCollision(bullet, player)) {
+                        enemyBullets.splice(bulletIndex, 1);
+                        gameState.lives--;
+                        createExplosion(player.x + player.width/2, player.y + player.height/2, 8);
+                        
+                        if (gameState.lives <= 0) {
+                            gameOver();
+                        }
                     }
-                }
-            });
+                });
+                
+                // 衝突判定 - 敵とプレイヤー（シールド考慮）
+                enemies.forEach((enemy, enemyIndex) => {
+                    if (checkCollision(enemy, player)) {
+                        enemies.splice(enemyIndex, 1);
+                        gameState.lives--;
+                        createExplosion(player.x + player.width/2, player.y + player.height/2, 10);
+                        
+                        if (gameState.lives <= 0) {
+                            gameOver();
+                        }
+                    }
+                });
+            }
             
             // 敵の生成（レベルに応じた出現率）
             if (Math.random() < gameState.enemySpawnRate) {
                 spawnEnemy();
+            }
+            
+            // パワーアップアイテムの生成（低確率）
+            if (Math.random() < 0.002) {
+                spawnPowerUp();
             }
             
             // UI更新
@@ -610,8 +812,32 @@
             // 敵描画
             enemies.forEach(enemy => enemy.draw());
             
+            // パワーアップアイテム描画
+            powerUps.forEach(powerUp => powerUp.draw());
+            
             // パーティクル描画
             particles.forEach(particle => particle.draw());
+            
+            // パワーアップステータス表示
+            let statusY = 50;
+            if (gameState.rapidFire > 0) {
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '14px Arial';
+                ctx.fillText(`連射強化: ${Math.ceil(gameState.rapidFire / 60)}秒`, 10, statusY);
+                statusY += 20;
+            }
+            if (gameState.powerShot > 0) {
+                ctx.fillStyle = '#ff6600';
+                ctx.font = '14px Arial';
+                ctx.fillText(`パワーショット: ${Math.ceil(gameState.powerShot / 60)}秒`, 10, statusY);
+                statusY += 20;
+            }
+            if (gameState.shield > 0) {
+                ctx.fillStyle = '#0088ff';
+                ctx.font = '14px Arial';
+                ctx.fillText(`シールド: ${Math.ceil(gameState.shield / 60)}秒`, 10, statusY);
+                statusY += 20;
+            }
             
             // レベル情報表示
             if (gameState.level === 1) {
@@ -647,7 +873,12 @@
                 gameTime: 0,
                 level: 1,
                 enemySpawnRate: 0.005,
-                enemyCanShoot: false
+                enemyCanShoot: false,
+                // パワーアップ関連
+                rapidFire: 0,
+                powerShot: 0,
+                shield: 0,
+                lastShot: 0
             };
             
             player.x = 50;
@@ -657,6 +888,7 @@
             enemyBullets = [];
             enemies = [];
             particles = [];
+            powerUps = [];
             
             document.getElementById('gameOver').style.display = 'none';
         }
