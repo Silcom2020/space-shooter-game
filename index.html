@@ -54,8 +54,9 @@
         <canvas id="gameCanvas" width="800" height="400"></canvas>
         <div id="gameInfo">
             <span>スコア: <span id="score">0</span></span>
-            <span style="margin-left: 20px;">ライフ: <span id="lives">3</span></span>
+            <span style="margin-left: 20px;">ライフ: <span id="lives">3</span>/<span id="maxLives">5</span></span>
             <span style="margin-left: 20px;">レベル: <span id="level">1</span></span>
+            <span style="margin-left: 20px;">コンボ: <span id="combo">0</span></span>
         </div>
         <div id="controls">
             操作: ↑↓←→キー移動 | スペースキー射撃 | Rキーリスタート | Sキーステージ選択 | 1-4キーステージ変更
@@ -75,6 +76,7 @@
         let gameState = {
             score: 0,
             lives: 3,
+            maxLives: 5,           // 最大ライフ数
             gameOver: false,
             keys: {},
             backgroundX: 0,
@@ -90,7 +92,14 @@
             // ステージ関連
             currentStage: 1,       // 現在のステージ
             stageTime: 0,          // ステージ内の経過時間
-            showStageSelect: false // ステージ選択画面の表示
+            showStageSelect: false, // ステージ選択画面の表示
+            // スコア・バランス関連
+            combo: 0,              // 連続撃破コンボ
+            comboTimer: 0,         // コンボタイマー
+            lastKillTime: 0,       // 最後に敵を倒した時間
+            nextLifeScore: 10000,  // 次のライフ獲得スコア
+            difficultyMultiplier: 1.0, // 難易度倍率
+            enemiesKilled: 0       // 撃破した敵の総数
         };
         
         // プレイヤー
@@ -755,23 +764,31 @@
             }
         }
         
-        // 敵の生成
+        // 敵の生成（改善版）
         function spawnEnemy() {
             const y = Math.random() * (canvas.height - 50) + 25;
             
-            // レベルに応じた敵タイプの出現率
+            // 難易度に応じた敵タイプの出現率調整
+            const difficultyFactor = gameState.difficultyMultiplier;
             const rand = Math.random();
             let type = 'basic';
             
-            if (gameState.level >= 5 && rand < 0.05) {
+            // レベルと難易度に応じた出現率
+            const megabossChance = Math.min(0.02 + gameState.level * 0.01, 0.08) * difficultyFactor;
+            const bossChance = Math.min(0.08 + gameState.level * 0.02, 0.20) * difficultyFactor;
+            const trackerChance = Math.min(0.15 + gameState.level * 0.03, 0.35) * difficultyFactor;
+            const splitterChance = Math.min(0.25 + gameState.level * 0.02, 0.40) * difficultyFactor;
+            const fastChance = Math.min(0.35 + gameState.level * 0.03, 0.50) * difficultyFactor;
+            
+            if (gameState.level >= 5 && rand < megabossChance) {
                 type = 'megaboss';
-            } else if (gameState.level >= 3 && rand < 0.15) {
+            } else if (gameState.level >= 3 && rand < bossChance) {
                 type = 'boss';
-            } else if (gameState.level >= 4 && rand < 0.25) {
+            } else if (gameState.level >= 4 && rand < trackerChance) {
                 type = 'tracker';
-            } else if (gameState.level >= 2 && rand < 0.35) {
+            } else if (gameState.level >= 2 && rand < splitterChance) {
                 type = 'splitter';
-            } else if (gameState.level >= 2 && rand < 0.55) {
+            } else if (gameState.level >= 2 && rand < fastChance) {
                 type = 'fast';
             }
             
@@ -797,40 +814,108 @@
                     gameState.shield = 300; // 5秒間
                     break;
                 case 'health':
-                    if (gameState.lives < 5) { // 最大5ライフまで
+                    if (gameState.lives < gameState.maxLives) {
                         gameState.lives++;
                     }
                     break;
             }
         }
         
-        // ゲームレベル管理
+        // コンボシステム
+        function updateCombo() {
+            if (gameState.comboTimer > 0) {
+                gameState.comboTimer--;
+                if (gameState.comboTimer <= 0) {
+                    gameState.combo = 0;
+                }
+            }
+        }
+        
+        // 敵撃破時のスコア計算（改善版）
+        function calculateScore(enemyType) {
+            let baseScore = 10;
+            switch(enemyType) {
+                case 'fast': baseScore = 15; break;
+                case 'splitter': baseScore = 25; break;
+                case 'tracker': baseScore = 30; break;
+                case 'boss': baseScore = 100; break;
+                case 'megaboss': baseScore = 250; break;
+            }
+            
+            // コンボボーナス
+            const comboMultiplier = 1 + (gameState.combo * 0.1);
+            
+            // ステージボーナス
+            const stageMultiplier = 1 + (gameState.currentStage - 1) * 0.2;
+            
+            // レベルボーナス
+            const levelMultiplier = 1 + (gameState.level - 1) * 0.1;
+            
+            const finalScore = Math.floor(baseScore * comboMultiplier * stageMultiplier * levelMultiplier);
+            
+            // コンボ更新
+            gameState.combo++;
+            gameState.comboTimer = 180; // 3秒間コンボ維持
+            gameState.lastKillTime = gameState.gameTime;
+            gameState.enemiesKilled++;
+            
+            return finalScore;
+        }
+        
+        // ライフシステムの改善
+        function checkLifeBonus() {
+            if (gameState.score >= gameState.nextLifeScore && gameState.lives < gameState.maxLives) {
+                gameState.lives++;
+                gameState.nextLifeScore += 15000; // 次のライフ獲得まで15000点
+                
+                // ライフ獲得エフェクト
+                createExplosion(player.x + player.width/2, player.y + player.height/2, 20);
+                
+                // ボーナススコア
+                gameState.score += 500;
+            }
+        }
+        
+        // ゲームレベル管理（改善版）
         function updateGameLevel() {
-            const newLevel = Math.floor(gameState.gameTime / 600) + 1; // 10秒ごとにレベルアップ
+            const newLevel = Math.floor(gameState.gameTime / 900) + 1; // 15秒ごとにレベルアップ（より緩やか）
             
             if (newLevel > gameState.level) {
                 gameState.level = newLevel;
                 
-                // レベルアップ時の調整
+                // 段階的な難易度調整
+                const baseDifficulty = 1.0;
+                const levelMultiplier = 0.15; // レベルごとの難易度増加を緩やか
+                gameState.difficultyMultiplier = baseDifficulty + (gameState.level - 1) * levelMultiplier;
+                
+                // レベルアップ時の調整（より滑らか）
                 switch(gameState.level) {
                     case 2:
-                        gameState.enemyCanShoot = true; // レベル2で敵が射撃開始
-                        gameState.enemySpawnRate = 0.008;
+                        gameState.enemyCanShoot = true;
+                        gameState.enemySpawnRate = 0.007;
                         break;
                     case 3:
-                        gameState.enemySpawnRate = 0.012; // 敵の出現率アップ
+                        gameState.enemySpawnRate = 0.009;
                         break;
                     case 4:
-                        gameState.enemySpawnRate = 0.015;
+                        gameState.enemySpawnRate = 0.011;
                         break;
                     case 5:
-                        gameState.enemySpawnRate = 0.018;
+                        gameState.enemySpawnRate = 0.013;
+                        break;
+                    case 6:
+                        gameState.enemySpawnRate = 0.015;
                         break;
                     default:
-                        if (gameState.level > 5) {
-                            gameState.enemySpawnRate = Math.min(0.025, 0.018 + (gameState.level - 5) * 0.002);
+                        if (gameState.level > 6) {
+                            // レベル6以降は緩やかに増加
+                            gameState.enemySpawnRate = Math.min(0.025, 0.015 + (gameState.level - 6) * 0.001);
                         }
                 }
+                
+                // レベルアップボーナス
+                gameState.score += gameState.level * 50;
+                createExplosion(canvas.width / 2, 50, 15);
             }
         }
         
@@ -1088,6 +1173,8 @@
             gameState.gameTime++;
             gameState.stageTime++;
             updateGameLevel();
+            updateCombo();
+            checkLifeBonus();
             
             // パワーアップ効果の時間減少
             if (gameState.rapidFire > 0) gameState.rapidFire--;
@@ -1127,22 +1214,21 @@
                         
                         if (enemy.takeDamage()) {
                             enemies.splice(enemyIndex, 1);
-                            // 敵タイプ別のスコア
-                            let score = 10;
-                            switch(enemy.type) {
-                                case 'fast': score = 15; break;
-                                case 'splitter': score = 25; break;
-                                case 'tracker': score = 30; break;
-                                case 'boss': score = 100; break;
-                                case 'megaboss': score = 250; break;
-                            }
+                            
+                            // 改善されたスコア計算
+                            const score = calculateScore(enemy.type);
                             gameState.score += score;
+                            
                             createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, 12);
                             
                             // パワーアップアイテムをランダムにドロップ（ボス系は高確率）
-                            let dropChance = 0.15;
-                            if (enemy.type === 'boss') dropChance = 0.4;
-                            if (enemy.type === 'megaboss') dropChance = 0.8;
+                            let dropChance = 0.12; // 基本ドロップ率を少し下げる
+                            if (enemy.type === 'boss') dropChance = 0.35;
+                            if (enemy.type === 'megaboss') dropChance = 0.75;
+                            
+                            // コンボボーナスでドロップ率向上
+                            if (gameState.combo >= 5) dropChance += 0.05;
+                            if (gameState.combo >= 10) dropChance += 0.05;
                             
                             if (Math.random() < dropChance) {
                                 spawnPowerUp();
@@ -1169,6 +1255,7 @@
                     if (checkCollision(bullet, player)) {
                         enemyBullets.splice(bulletIndex, 1);
                         gameState.lives--;
+                        gameState.combo = 0; // コンボリセット
                         createExplosion(player.x + player.width/2, player.y + player.height/2, 8);
                         
                         if (gameState.lives <= 0) {
@@ -1182,6 +1269,7 @@
                     if (checkCollision(enemy, player)) {
                         enemies.splice(enemyIndex, 1);
                         gameState.lives--;
+                        gameState.combo = 0; // コンボリセット
                         createExplosion(player.x + player.width/2, player.y + player.height/2, 10);
                         
                         if (gameState.lives <= 0) {
@@ -1191,8 +1279,9 @@
                 });
             }
             
-            // 敵の生成（レベルに応じた出現率）
-            let spawnRate = gameState.enemySpawnRate;
+            // 敵の生成（レベルと難易度に応じた出現率）
+            let spawnRate = gameState.enemySpawnRate * gameState.difficultyMultiplier;
+            
             // ステージ別の出現率調整
             switch(gameState.currentStage) {
                 case 2: spawnRate *= 1.2; break;
@@ -1204,15 +1293,21 @@
                 spawnEnemy();
             }
             
-            // パワーアップアイテムの生成（低確率）
-            if (Math.random() < 0.002) {
+            // パワーアップアイテムの生成（コンボに応じて確率向上）
+            let powerUpSpawnRate = 0.002;
+            if (gameState.combo >= 5) powerUpSpawnRate += 0.001;
+            if (gameState.combo >= 10) powerUpSpawnRate += 0.001;
+            
+            if (Math.random() < powerUpSpawnRate) {
                 spawnPowerUp();
             }
             
             // UI更新
             document.getElementById('score').textContent = gameState.score;
             document.getElementById('lives').textContent = gameState.lives;
+            document.getElementById('maxLives').textContent = gameState.maxLives;
             document.getElementById('level').textContent = gameState.level;
+            document.getElementById('combo').textContent = gameState.combo;
         }
         
         // 描画
@@ -1262,10 +1357,35 @@
                 statusY += 20;
             }
             
+            // コンボ表示
+            if (gameState.combo > 0) {
+                ctx.fillStyle = gameState.combo >= 10 ? '#ff00ff' : gameState.combo >= 5 ? '#ffff00' : '#00ff00';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(`${gameState.combo} COMBO!`, canvas.width - 150, 50);
+                
+                // コンボボーナス表示
+                const comboBonus = Math.floor(gameState.combo * 10);
+                ctx.font = '12px Arial';
+                ctx.fillText(`+${comboBonus}% ボーナス`, canvas.width - 150, 70);
+            }
+            
+            // 次のライフまでのスコア表示
+            if (gameState.lives < gameState.maxLives) {
+                const remaining = gameState.nextLifeScore - gameState.score;
+                ctx.fillStyle = '#88ff88';
+                ctx.font = '12px Arial';
+                ctx.fillText(`次のライフまで: ${remaining}点`, canvas.width - 200, canvas.height - 20);
+            }
+            
             // ステージ情報表示
             ctx.fillStyle = '#ffffff';
             ctx.font = '16px Arial';
             ctx.fillText(`ステージ ${gameState.currentStage}`, canvas.width - 120, 25);
+            
+            // 難易度表示
+            ctx.fillStyle = '#cccccc';
+            ctx.font = '12px Arial';
+            ctx.fillText(`難易度: ${gameState.difficultyMultiplier.toFixed(1)}x`, canvas.width - 120, 90);
             
             // レベル情報表示
             if (gameState.level === 1) {
@@ -1344,6 +1464,7 @@
             gameState = {
                 score: 0,
                 lives: 3,
+                maxLives: 5,
                 gameOver: false,
                 keys: {},
                 backgroundX: 0,
@@ -1359,7 +1480,14 @@
                 // ステージ関連
                 currentStage: gameState.currentStage || 1, // 現在のステージを保持
                 stageTime: 0,
-                showStageSelect: false
+                showStageSelect: false,
+                // スコア・バランス関連
+                combo: 0,
+                comboTimer: 0,
+                lastKillTime: 0,
+                nextLifeScore: 10000,
+                difficultyMultiplier: 1.0,
+                enemiesKilled: 0
             };
             
             player.x = 50;
