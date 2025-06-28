@@ -59,7 +59,7 @@
             <span style="margin-left: 20px;">コンボ: <span id="combo">0</span></span>
         </div>
         <div id="controls">
-            操作: ↑↓←→キー移動 | スペースキー射撃 | Rキーリスタート | Sキーステージ選択 | 1-4キーステージ変更
+            操作: ↑↓←→移動 | SPACE射撃 | P一時停止 | S ステージ選択 | H ヘルプ | ESC メニュー
         </div>
         <div id="gameOver">
             <h2>ゲームオーバー</h2>
@@ -99,7 +99,13 @@
             lastKillTime: 0,       // 最後に敵を倒した時間
             nextLifeScore: 10000,  // 次のライフ獲得スコア
             difficultyMultiplier: 1.0, // 難易度倍率
-            enemiesKilled: 0       // 撃破した敵の総数
+            enemiesKilled: 0,      // 撃破した敵の総数
+            // UI状態管理
+            gameStarted: false,    // ゲーム開始フラグ
+            paused: false,         // 一時停止フラグ
+            showSettings: false,   // 設定画面表示フラグ
+            showHelp: false,       // ヘルプ画面表示フラグ
+            currentScreen: 'title' // 現在の画面 ('title', 'game', 'settings', 'help')
         };
         
         // プレイヤー
@@ -703,44 +709,95 @@
         document.addEventListener('keydown', (e) => {
             gameState.keys[e.code] = true;
             
-            if (e.code === 'Space') {
-                e.preventDefault();
-                if (!gameState.gameOver && !gameState.showStageSelect) {
-                    shoot();
+            // タイトル画面での操作
+            if (gameState.currentScreen === 'title') {
+                if (e.code === 'Enter' || e.code === 'Space') {
+                    startGame();
+                } else if (e.code === 'KeyH') {
+                    gameState.currentScreen = 'help';
+                } else if (e.code === 'KeyO') {
+                    gameState.currentScreen = 'settings';
                 }
+                return;
             }
             
-            if (e.code === 'KeyR') {
-                restartGame();
+            // ヘルプ・設定画面での操作
+            if (gameState.currentScreen === 'help' || gameState.currentScreen === 'settings') {
+                if (e.code === 'Escape' || e.code === 'KeyB') {
+                    gameState.currentScreen = 'title';
+                }
+                return;
             }
             
-            // ステージ選択（1-4キー）
-            if (e.code === 'Digit1') {
-                gameState.currentStage = 1;
-                gameState.showStageSelect = false;
-            }
-            if (e.code === 'Digit2') {
-                gameState.currentStage = 2;
-                gameState.showStageSelect = false;
-            }
-            if (e.code === 'Digit3') {
-                gameState.currentStage = 3;
-                gameState.showStageSelect = false;
-            }
-            if (e.code === 'Digit4') {
-                gameState.currentStage = 4;
-                gameState.showStageSelect = false;
-            }
-            
-            // ステージ選択画面の表示/非表示（Sキー）
-            if (e.code === 'KeyS') {
-                gameState.showStageSelect = !gameState.showStageSelect;
+            // ゲーム中の操作
+            if (gameState.currentScreen === 'game') {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    if (!gameState.gameOver && !gameState.paused && !gameState.showStageSelect) {
+                        shoot();
+                    }
+                }
+                
+                if (e.code === 'KeyP') {
+                    if (!gameState.gameOver) {
+                        gameState.paused = !gameState.paused;
+                    }
+                }
+                
+                if (e.code === 'KeyR') {
+                    restartGame();
+                }
+                
+                // ステージ選択（1-4キー）
+                if (e.code === 'Digit1') {
+                    gameState.currentStage = 1;
+                    gameState.showStageSelect = false;
+                }
+                if (e.code === 'Digit2') {
+                    gameState.currentStage = 2;
+                    gameState.showStageSelect = false;
+                }
+                if (e.code === 'Digit3') {
+                    gameState.currentStage = 3;
+                    gameState.showStageSelect = false;
+                }
+                if (e.code === 'Digit4') {
+                    gameState.currentStage = 4;
+                    gameState.showStageSelect = false;
+                }
+                
+                // ステージ選択画面の表示/非表示（Sキー）
+                if (e.code === 'KeyS') {
+                    if (!gameState.paused) {
+                        gameState.showStageSelect = !gameState.showStageSelect;
+                    }
+                }
+                
+                // ヘルプ表示（Hキー）
+                if (e.code === 'KeyH') {
+                    gameState.showHelp = !gameState.showHelp;
+                }
+                
+                // メインメニューに戻る（Escキー）
+                if (e.code === 'Escape') {
+                    gameState.currentScreen = 'title';
+                    gameState.gameStarted = false;
+                    gameState.paused = false;
+                }
             }
         });
         
         document.addEventListener('keyup', (e) => {
             gameState.keys[e.code] = false;
         });
+        
+        // ゲーム開始
+        function startGame() {
+            gameState.currentScreen = 'game';
+            gameState.gameStarted = true;
+            gameState.paused = false;
+            restartGame();
+        }
         
         // プレイヤーの射撃
         function shoot() {
@@ -1167,7 +1224,11 @@
         
         // ゲーム更新
         function update() {
-            if (gameState.gameOver || gameState.showStageSelect) return;
+            // ゲーム画面以外では更新しない
+            if (gameState.currentScreen !== 'game') return;
+            
+            // ゲームオーバー、ポーズ、ステージ選択中は更新しない
+            if (gameState.gameOver || gameState.paused || gameState.showStageSelect) return;
             
             // ゲーム時間更新
             gameState.gameTime++;
@@ -1314,10 +1375,198 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
+            // 画面に応じた描画
+            switch(gameState.currentScreen) {
+                case 'title':
+                    drawTitleScreen();
+                    break;
+                case 'help':
+                    drawHelpScreen();
+                    break;
+                case 'settings':
+                    drawSettingsScreen();
+                    break;
+                case 'game':
+                    drawGameScreen();
+                    break;
+            }
+        }
+        
+        // タイトル画面の描画
+        function drawTitleScreen() {
+            drawBackground();
+            
+            // タイトル
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('SPACE SHOOTER', canvas.width / 2, 120);
+            
+            // サブタイトル
+            ctx.fillStyle = '#aaaaff';
+            ctx.font = '20px Arial';
+            ctx.fillText('宇宙戦闘シューティングゲーム', canvas.width / 2, 160);
+            
+            // メニューオプション
+            const menuItems = [
+                { text: 'ENTER / SPACE - ゲーム開始', y: 220 },
+                { text: 'H - 操作説明', y: 260 },
+                { text: 'O - 設定', y: 300 }
+            ];
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '18px Arial';
+            menuItems.forEach(item => {
+                ctx.fillText(item.text, canvas.width / 2, item.y);
+            });
+            
+            // ゲーム説明
+            ctx.fillStyle = '#cccccc';
+            ctx.font = '14px Arial';
+            const description = [
+                '4つのステージで様々な敵と戦おう！',
+                'パワーアップアイテムを集めて強化！',
+                'コンボシステムで高スコアを狙え！'
+            ];
+            
+            description.forEach((line, index) => {
+                ctx.fillText(line, canvas.width / 2, 350 + index * 25);
+            });
+            
+            ctx.textAlign = 'left';
+        }
+        
+        // ヘルプ画面の描画
+        function drawHelpScreen() {
+            // 背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // タイトル
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('操作説明', canvas.width / 2, 40);
+            
+            // 操作説明
+            const controls = [
+                { key: '↑↓←→', desc: '戦闘機の移動' },
+                { key: 'SPACE', desc: 'レーザー射撃' },
+                { key: 'P', desc: '一時停止/再開' },
+                { key: 'S', desc: 'ステージ選択' },
+                { key: '1-4', desc: 'ステージ直接選択' },
+                { key: 'H', desc: 'ヘルプ表示' },
+                { key: 'R', desc: 'ゲームリスタート' },
+                { key: 'ESC', desc: 'メインメニューに戻る' }
+            ];
+            
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'left';
+            controls.forEach((control, index) => {
+                const y = 80 + index * 30;
+                ctx.fillStyle = '#ffff00';
+                ctx.fillText(control.key, 100, y);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(': ' + control.desc, 200, y);
+            });
+            
+            // パワーアップ説明
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('パワーアップアイテム', canvas.width / 2, 320);
+            
+            const powerUps = [
+                { color: '#00ff00', name: '連射強化', desc: '弾の発射間隔短縮' },
+                { color: '#ff6600', name: 'パワーショット', desc: '3方向同時射撃' },
+                { color: '#0088ff', name: 'シールド', desc: '敵攻撃を無効化' },
+                { color: '#ff0088', name: 'ライフ回復', desc: 'ライフを1つ回復' }
+            ];
+            
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'left';
+            powerUps.forEach((powerUp, index) => {
+                const y = 350 + index * 25;
+                ctx.fillStyle = powerUp.color;
+                ctx.fillText('■', 150, y);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(powerUp.name + ': ' + powerUp.desc, 170, y);
+            });
+            
+            // 戻る説明
+            ctx.fillStyle = '#aaaaaa';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('ESC / B - 戻る', canvas.width / 2, canvas.height - 20);
+            
+            ctx.textAlign = 'left';
+        }
+        
+        // 設定画面の描画
+        function drawSettingsScreen() {
+            // 背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // タイトル
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('設定', canvas.width / 2, 40);
+            
+            // 設定項目（将来の拡張用）
+            const settings = [
+                '音量設定: 未実装',
+                '難易度設定: 自動調整',
+                'グラフィック設定: 標準',
+                'キー設定: デフォルト'
+            ];
+            
+            ctx.font = '18px Arial';
+            ctx.textAlign = 'left';
+            settings.forEach((setting, index) => {
+                ctx.fillStyle = '#cccccc';
+                ctx.fillText(setting, 100, 100 + index * 40);
+            });
+            
+            // ゲーム統計
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('ゲーム統計', canvas.width / 2, 280);
+            
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('現在のレベル: ' + gameState.level, 100, 320);
+            ctx.fillText('撃破した敵: ' + gameState.enemiesKilled, 100, 350);
+            ctx.fillText('現在のスコア: ' + gameState.score, 100, 380);
+            
+            // 戻る説明
+            ctx.fillStyle = '#aaaaaa';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('ESC / B - 戻る', canvas.width / 2, canvas.height - 20);
+            
+            ctx.textAlign = 'left';
+        }
+        
+        // ゲーム画面の描画
+        function drawGameScreen() {
             drawBackground();
             
             if (gameState.showStageSelect) {
                 drawStageSelect();
+                return;
+            }
+            
+            if (gameState.paused) {
+                drawPauseScreen();
+                return;
+            }
+            
+            if (gameState.showHelp) {
+                drawGameHelp();
                 return;
             }
             
@@ -1401,6 +1650,83 @@
                 ctx.font = '16px Arial';
                 ctx.fillText(`レベル${gameState.level}: 危険度MAX！`, 10, 30);
             }
+        }
+        
+        // ポーズ画面の描画
+        function drawPauseScreen() {
+            // 半透明の背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // ポーズメッセージ
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 36px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 50);
+            
+            // 操作説明
+            ctx.font = '18px Arial';
+            ctx.fillText('P - 再開', canvas.width / 2, canvas.height / 2 + 20);
+            ctx.fillText('ESC - メインメニューに戻る', canvas.width / 2, canvas.height / 2 + 50);
+            ctx.fillText('H - ヘルプ', canvas.width / 2, canvas.height / 2 + 80);
+            
+            ctx.textAlign = 'left';
+        }
+        
+        // ゲーム内ヘルプの描画
+        function drawGameHelp() {
+            // 半透明の背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // タイトル
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('ゲーム内ヘルプ', canvas.width / 2, 40);
+            
+            // 簡易操作説明
+            const quickHelp = [
+                'P: 一時停止',
+                'S: ステージ選択',
+                'H: ヘルプ表示',
+                'ESC: メインメニュー'
+            ];
+            
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'left';
+            quickHelp.forEach((help, index) => {
+                ctx.fillStyle = '#ffff00';
+                ctx.fillText(help, 50, 80 + index * 25);
+            });
+            
+            // コンボのコツ
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('コンボのコツ', canvas.width / 2, 200);
+            
+            const comboTips = [
+                '3秒以内に次の敵を倒すとコンボ継続',
+                'コンボが高いほどスコアボーナス増加',
+                '被弾するとコンボがリセット',
+                'コンボ5以上でパワーアップドロップ率UP'
+            ];
+            
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'left';
+            comboTips.forEach((tip, index) => {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText('• ' + tip, 50, 230 + index * 25);
+            });
+            
+            // 閉じる説明
+            ctx.fillStyle = '#aaaaaa';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('H - 閉じる', canvas.width / 2, canvas.height - 20);
+            
+            ctx.textAlign = 'left';
         }
         
         // ステージ選択画面
@@ -1487,7 +1813,13 @@
                 lastKillTime: 0,
                 nextLifeScore: 10000,
                 difficultyMultiplier: 1.0,
-                enemiesKilled: 0
+                enemiesKilled: gameState.enemiesKilled || 0, // 統計を保持
+                // UI状態管理
+                gameStarted: true,
+                paused: false,
+                showSettings: false,
+                showHelp: false,
+                currentScreen: 'game'
             };
             
             player.x = 50;
@@ -1510,6 +1842,7 @@
         }
         
         // ゲーム開始
+        gameState.currentScreen = 'title'; // 初期画面をタイトルに設定
         gameLoop();
     </script>
 </body>
