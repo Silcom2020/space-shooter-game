@@ -134,9 +134,52 @@
         // 背景オブジェクト配列
         let backgroundObjects = [];
         
+        // パフォーマンス最適化用変数
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let fps = 60;
+        let deltaTime = 0;
+        const targetFPS = 60;
+        const frameInterval = 1000 / targetFPS;
+        
+        // オブジェクトプール（メモリ最適化）
+        const objectPools = {
+            bullets: [],
+            particles: [],
+            enemies: []
+        };
+        
+        // オブジェクトプールから取得
+        function getFromPool(poolName, constructor, ...args) {
+            const pool = objectPools[poolName];
+            if (pool.length > 0) {
+                const obj = pool.pop();
+                // オブジェクトを再初期化
+                if (obj.reset) {
+                    obj.reset(...args);
+                } else {
+                    Object.assign(obj, new constructor(...args));
+                }
+                return obj;
+            }
+            return new constructor(...args);
+        }
+        
+        // オブジェクトをプールに戻す
+        function returnToPool(poolName, obj) {
+            const pool = objectPools[poolName];
+            if (pool.length < 50) { // プールサイズ制限
+                pool.push(obj);
+            }
+        }
+        
         // 弾丸クラス
         class Bullet {
             constructor(x, y, speedX, speedY, color = '#00ffff', type = 'player') {
+                this.reset(x, y, speedX, speedY, color, type);
+            }
+            
+            reset(x, y, speedX, speedY, color = '#00ffff', type = 'player') {
                 this.x = x;
                 this.y = y;
                 this.speedX = speedX;
@@ -311,28 +354,28 @@
                         const distance = Math.sqrt(dx * dx + dy * dy);
                         const speedX = (dx / distance) * Math.abs(bulletSpeed);
                         const speedY = (dy / distance) * Math.abs(bulletSpeed);
-                        enemyBullets.push(new Bullet(this.x, this.y + this.height/2, speedX, speedY, '#ff4488', 'enemy'));
+                        enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, speedX, speedY, '#ff4488', 'enemy'));
                         break;
                     case 'megaboss':
                         // 大型ボスは7方向射撃
                         for (let i = -3; i <= 3; i++) {
-                            enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, i * 1.5, '#8800ff', 'enemy'));
+                            enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, i * 1.5, '#8800ff', 'enemy'));
                         }
                         break;
                     case 'boss':
                         // 通常ボスは3-5方向射撃
-                        enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, 0, '#ff4444', 'enemy'));
-                        enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, -2, '#ff4444', 'enemy'));
-                        enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, 2, '#ff4444', 'enemy'));
+                        enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, 0, '#ff4444', 'enemy'));
+                        enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, -2, '#ff4444', 'enemy'));
+                        enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, 2, '#ff4444', 'enemy'));
                         
                         if (gameState.level >= 3) {
-                            enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, -4, '#ff4444', 'enemy'));
-                            enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, 4, '#ff4444', 'enemy'));
+                            enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, -4, '#ff4444', 'enemy'));
+                            enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, 4, '#ff4444', 'enemy'));
                         }
                         break;
                     default:
                         // 通常の敵は直線射撃
-                        enemyBullets.push(new Bullet(this.x, this.y + this.height/2, bulletSpeed, 0, '#ff4444', 'enemy'));
+                        enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, bulletSpeed, 0, '#ff4444', 'enemy'));
                 }
             }
             
@@ -569,6 +612,10 @@
         // パーティクルクラス
         class Particle {
             constructor(x, y) {
+                this.reset(x, y);
+            }
+            
+            reset(x, y) {
                 this.x = x;
                 this.y = y;
                 this.speedX = (Math.random() - 0.5) * 6;
@@ -792,7 +839,7 @@
                 const speed = 3;
                 const speedX = (dx / distance) * speed;
                 const speedY = (dy / distance) * speed;
-                enemyBullets.push(new Bullet(this.x, this.y + this.height/2, speedX, speedY, '#ff8800', 'enemy'));
+                enemyBullets.push(getFromPool('bullets', Bullet, this.x, this.y + this.height/2, speedX, speedY, '#ff8800', 'enemy'));
             }
             
             draw() {
@@ -965,6 +1012,8 @@
                     gameState.currentScreen = 'title';
                     gameState.gameStarted = false;
                     gameState.paused = false;
+                    gameState.gameOver = false;
+                    document.getElementById('gameOver').style.display = 'none'; // ゲームオーバー表示を隠す
                 }
             }
         });
@@ -978,6 +1027,8 @@
             gameState.currentScreen = 'game';
             gameState.gameStarted = true;
             gameState.paused = false;
+            gameState.gameOver = false;
+            document.getElementById('gameOver').style.display = 'none'; // ゲームオーバー表示を隠す
             restartGame();
         }
         
@@ -994,12 +1045,12 @@
             
             if (gameState.powerShot > 0) {
                 // パワーショット（3方向）
-                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 0, '#ffff00', 'player'));
-                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, -2, '#ffff00', 'player'));
-                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 2, '#ffff00', 'player'));
+                bullets.push(getFromPool('bullets', Bullet, player.x + player.width, player.y + player.height/2, 8, 0, '#ffff00', 'player'));
+                bullets.push(getFromPool('bullets', Bullet, player.x + player.width, player.y + player.height/2, 8, -2, '#ffff00', 'player'));
+                bullets.push(getFromPool('bullets', Bullet, player.x + player.width, player.y + player.height/2, 8, 2, '#ffff00', 'player'));
             } else {
                 // 通常射撃
-                bullets.push(new Bullet(player.x + player.width, player.y + player.height/2, 8, 0, '#00ffff', 'player'));
+                bullets.push(getFromPool('bullets', Bullet, player.x + player.width, player.y + player.height/2, 8, 0, '#00ffff', 'player'));
             }
         }
         
@@ -1209,7 +1260,7 @@
         // パーティクル生成
         function createExplosion(x, y, count = 8) {
             for (let i = 0; i < count; i++) {
-                particles.push(new Particle(x, y));
+                particles.push(getFromPool('particles', Particle, x, y));
             }
         }
         
@@ -1248,31 +1299,53 @@
             }
         }
         
-        // 星空の描画
+        // 描画最適化用キャッシュ
+        let starFieldCache = null;
+        let lastStarFieldUpdate = 0;
+        
+        // 星空の描画（キャッシュ対応）
         function drawStarField() {
-            // 小さな星
-            ctx.fillStyle = '#ffffff';
-            for (let i = 0; i < canvas.width + 100; i += 100) {
-                for (let j = 0; j < canvas.height; j += 80) {
-                    const starX = i + gameState.backgroundX + (j % 3) * 20;
-                    const starY = j + (i % 4) * 15;
-                    if (starX > -10 && starX < canvas.width + 10) {
-                        ctx.fillRect(starX, starY, 1, 1);
+            // 星空は頻繁に変わらないのでキャッシュを使用
+            if (!starFieldCache || gameState.gameTime - lastStarFieldUpdate > 300) {
+                // 5秒ごとに更新
+                starFieldCache = [];
+                
+                // 小さな星
+                for (let i = 0; i < canvas.width + 100; i += 100) {
+                    for (let j = 0; j < canvas.height; j += 80) {
+                        starFieldCache.push({
+                            x: i + (j % 3) * 20,
+                            y: j + (i % 4) * 15,
+                            size: 1,
+                            color: '#ffffff'
+                        });
                     }
                 }
+                
+                // 大きな星
+                for (let i = 0; i < canvas.width + 150; i += 150) {
+                    for (let j = 0; j < canvas.height; j += 120) {
+                        starFieldCache.push({
+                            x: i + (j % 5) * 30,
+                            y: j + (i % 6) * 20,
+                            size: 2,
+                            color: '#aaaaff',
+                            speed: 0.5
+                        });
+                    }
+                }
+                
+                lastStarFieldUpdate = gameState.gameTime;
             }
             
-            // 大きな星
-            ctx.fillStyle = '#aaaaff';
-            for (let i = 0; i < canvas.width + 150; i += 150) {
-                for (let j = 0; j < canvas.height; j += 120) {
-                    const starX = i + gameState.backgroundX * 0.5 + (j % 5) * 30;
-                    const starY = j + (i % 6) * 20;
-                    if (starX > -10 && starX < canvas.width + 10) {
-                        ctx.fillRect(starX, starY, 2, 2);
-                    }
+            // キャッシュされた星を描画
+            starFieldCache.forEach(star => {
+                const starX = star.x + gameState.backgroundX * (star.speed || 1);
+                if (starX > -10 && starX < canvas.width + 10) {
+                    ctx.fillStyle = star.color;
+                    ctx.fillRect(starX, star.y, star.size, star.size);
                 }
-            }
+            });
         }
         
         // 敵基地の警告ライト
@@ -1366,15 +1439,23 @@
             
             updatePlayer();
             
-            // 弾丸更新
+            // 弾丸更新（オブジェクトプール対応）
             bullets = bullets.filter(bullet => {
                 bullet.update();
-                return !bullet.isOffScreen();
+                if (bullet.isOffScreen()) {
+                    returnToPool('bullets', bullet);
+                    return false;
+                }
+                return true;
             });
             
             enemyBullets = enemyBullets.filter(bullet => {
                 bullet.update();
-                return !bullet.isOffScreen();
+                if (bullet.isOffScreen()) {
+                    returnToPool('bullets', bullet);
+                    return false;
+                }
+                return true;
             });
             
             // 敵更新
@@ -1389,14 +1470,21 @@
             backgroundObjects.forEach(obj => obj.update());
             backgroundObjects = backgroundObjects.filter(obj => !obj.isOffScreen());
             
-            // パーティクル更新
-            particles.forEach(particle => particle.update());
-            particles = particles.filter(particle => !particle.isDead());
+            // パーティクル更新（オブジェクトプール対応）
+            particles = particles.filter(particle => {
+                particle.update();
+                if (particle.isDead()) {
+                    returnToPool('particles', particle);
+                    return false;
+                }
+                return true;
+            });
             
             // 衝突判定 - プレイヤーの弾と敵
             bullets.forEach((bullet, bulletIndex) => {
                 enemies.forEach((enemy, enemyIndex) => {
                     if (checkCollision(bullet, enemy)) {
+                        returnToPool('bullets', bullet);
                         bullets.splice(bulletIndex, 1);
                         
                         if (enemy.takeDamage()) {
@@ -1459,6 +1547,7 @@
             if (gameState.shield <= 0) {
                 enemyBullets.forEach((bullet, bulletIndex) => {
                     if (checkCollision(bullet, player)) {
+                        returnToPool('bullets', bullet);
                         enemyBullets.splice(bulletIndex, 1);
                         gameState.lives--;
                         gameState.combo = 0; // コンボリセット
@@ -1678,7 +1767,8 @@
                 '音量設定: 未実装',
                 '難易度設定: 自動調整',
                 'グラフィック設定: 標準',
-                'キー設定: デフォルト'
+                'キー設定: デフォルト',
+                `フレームレート: ${fps} FPS`
             ];
             
             ctx.font = '18px Arial';
@@ -1994,13 +2084,36 @@
             powerUps = [];
             backgroundObjects = [];
             
+            // オブジェクトプールをクリア
+            objectPools.bullets = [];
+            objectPools.particles = [];
+            objectPools.enemies = [];
+            
+            // 描画キャッシュをクリア
+            starFieldCache = null;
+            
             document.getElementById('gameOver').style.display = 'none';
         }
         
-        // ゲームループ
-        function gameLoop() {
-            update();
-            draw();
+        // ゲームループ（フレームレート制御付き）
+        function gameLoop(currentTime = 0) {
+            // フレームレート計算
+            deltaTime = currentTime - lastFrameTime;
+            
+            // フレームレート制御
+            if (deltaTime >= frameInterval) {
+                // FPS計算
+                frameCount++;
+                if (frameCount % 60 === 0) {
+                    fps = Math.round(1000 / deltaTime);
+                }
+                
+                update();
+                draw();
+                
+                lastFrameTime = currentTime;
+            }
+            
             requestAnimationFrame(gameLoop);
         }
         
